@@ -36,7 +36,7 @@ library
                      , asn1-types
                      , asn1-encoding
                      , asn1-parse
-
+                     , text
 test-suite             tests
   ghc-options:         -W
   type:                exitcode-stdio-1.0

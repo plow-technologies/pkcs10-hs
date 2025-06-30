@@ -1,4 +1,5 @@
 {-# LANGUAGE DeriveDataTypeable        #-}
+{-# LANGUAGE TypeApplications          #-}
 {-# LANGUAGE ExistentialQuantification #-}
 {-# LANGUAGE StandaloneDeriving        #-}
 
@@ -20,6 +21,8 @@ module Data.X509.PKCS10
     , PKCS9Attributes(..)
     , CertificationRequestInfo(..)
     , CertificationRequest(..)
+    , ExtChallengePassword (..)
+    , challengePassword
     , SignedCertificationRequest(..)
     , Version(..)
     , Signature(..)
@@ -48,6 +51,8 @@ import           Data.ASN1.Encoding
 import           Data.ASN1.OID
 import           Data.ASN1.Parse
 import           Data.ASN1.Types
+import qualified Data.Text as Text
+import qualified Data.Text.Encoding as Text
 import           Crypto.Number.Serialize
 import qualified Data.ByteString          as B
 import qualified Data.ByteString.Char8    as BC
@@ -129,6 +134,26 @@ instance OIDNameable X520Attribute where
   fromObjectID [0,9,2342,19200300,100,1,1]  = Just UserId
   fromObjectID oid                          = Just $ RawAttribute oid
 
+-- | A challenge password PKCS9 Attribute
+challengePassword :: String -> PKCS9Attribute
+challengePassword pw = PKCS9Attribute $ ExtChallengePassword pw
+
+newtype ExtChallengePassword = ExtChallengePassword
+  { unExtChallengePassword :: String
+  }
+  deriving (Eq, Show)
+
+instance Extension ExtChallengePassword where
+  extOID = const [1, 2, 840, 113549, 1, 9, 7]
+  extEncode (ExtChallengePassword pw) =
+    [ASN1String $ asn1CharacterString UTF8 pw]
+  extDecode [ASN1String charStr] =
+    case charStr of
+      ASN1CharacterString UTF8 bs -> Right (ExtChallengePassword $ Text.unpack $ Text.decodeUtf8Lenient bs)
+      _ -> Left "Challenge password is not a UTF8 character string"
+  extDecode _ = Left "Invalid challenge password extension format"
+  extHasNestedASN1 = const False
+
 -- | A list of PKCS9 extension attributes.
 data PKCS9Attribute =
   forall e . (Extension e, Show e, Eq e, Typeable e) => PKCS9Attribute e
@@ -201,7 +226,7 @@ instance ASN1Object CertificationRequest where
       (End Sequence : xs)
 
   fromASN1 xs =
-    f <$> (parseSignedCertificationRequest xs)
+    f <$> parseSignedCertificationRequest xs
     where
      f (scr, xs') = (certificationRequest scr, xs')
 
@@ -305,13 +330,14 @@ instance ASN1Object PKCS9Attribute where
 
   fromASN1 (Start Sequence : OID oid : OctetString os : End Sequence : xs) =
     case oid of
-      [2,5,29,14] -> f (decode :: Either String ExtSubjectKeyId)
-      [2,5,29,15] -> f (decode :: Either String ExtKeyUsage)
-      [2,5,29,17] -> f (decode :: Either String ExtSubjectAltName)
-      [2,5,29,19] -> f (decode :: Either String ExtBasicConstraints)
-      [2,5,29,31] -> f (decode :: Either String ExtCrlDistributionPoints)
-      [2,5,29,35] -> f (decode :: Either String ExtAuthorityKeyId)
-      [2,5,29,37] -> f (decode :: Either String ExtExtendedKeyUsage)
+      [2,5,29,14] -> f (decode @ExtSubjectKeyId)
+      [2,5,29,15] -> f (decode @ExtKeyUsage)
+      [2,5,29,17] -> f (decode @ExtSubjectAltName)
+      [2,5,29,19] -> f (decode @ExtBasicConstraints)
+      [2,5,29,31] -> f (decode @ExtCrlDistributionPoints)
+      [2,5,29,35] -> f (decode @ExtAuthorityKeyId)
+      [2,5,29,37] -> f (decode @ExtExtendedKeyUsage)
+      [1, 2, 840, 113549, 1, 9, 7] -> f (decode @ExtChallengePassword)
       _ -> Left "fromASN1: PKCS9.Attribute: unknown oid"
     where
       decode :: forall e . (Extension e, Show e, Eq e, Typeable e) => Either String e
